@@ -4,26 +4,31 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Scale, LogIn, UserPlus, Eye, EyeOff } from "lucide-react";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
+import { Scale, LogIn, UserPlus, Eye, EyeOff, ArrowLeft, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
 const AuthPage = () => {
-  const [isLogin, setIsLogin] = useState(true);
-  const [username, setUsername] = useState("");
+  const [mode, setMode] = useState<"login" | "signup" | "verify-otp">("login");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { signIn, signUp } = useAuth();
+  const [otpValue, setOtpValue] = useState("");
+  const [pendingEmail, setPendingEmail] = useState("");
+  const [pendingPassword, setPendingPassword] = useState("");
+  const { signIn, signUp, verifyOtp } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
   const handleLogin = async () => {
-    if (!username.trim() || !password.trim()) return;
+    if (!email.trim() || !password.trim()) return;
     setLoading(true);
-    const { error, isAdmin } = await signIn(username.trim(), password);
+    const { error, isAdmin } = await signIn(email.trim(), password);
     setLoading(false);
     if (error) {
       toast({ title: "Login Failed", description: error, variant: "destructive" });
@@ -33,8 +38,12 @@ const AuthPage = () => {
   };
 
   const handleSignup = async () => {
-    if (!name.trim() || !username.trim() || !phone.trim() || !password || !confirmPassword) {
+    if (!name.trim() || !email.trim() || !phone.trim() || !password || !confirmPassword) {
       toast({ title: "Missing Fields", description: "Please fill all fields", variant: "destructive" });
+      return;
+    }
+    if (!email.includes("@")) {
+      toast({ title: "Invalid Email", description: "Please enter a valid email address", variant: "destructive" });
       return;
     }
     if (password !== confirmPassword) {
@@ -46,15 +55,100 @@ const AuthPage = () => {
       return;
     }
     setLoading(true);
-    const error = await signUp(username.trim(), password, name.trim(), phone.trim());
+    const error = await signUp(email.trim(), password, name.trim(), phone.trim());
     setLoading(false);
     if (error) {
       toast({ title: "Signup Failed", description: error, variant: "destructive" });
       return;
     }
-    toast({ title: "Account Created", description: "You are now logged in" });
-    navigate("/dashboard");
+    setPendingEmail(email.trim());
+    setPendingPassword(password);
+    setMode("verify-otp");
+    toast({ title: "Verification Code Sent", description: "Check your email for the 6-digit code" });
   };
+
+  const handleVerifyOtp = async () => {
+    if (otpValue.length !== 6) return;
+    setLoading(true);
+    const { error, isAdmin } = await verifyOtp(pendingEmail, otpValue, pendingPassword);
+    setLoading(false);
+    if (error) {
+      toast({ title: "Verification Failed", description: error, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Account Verified", description: "Welcome to Legal Intelligence Workspace!" });
+    navigate(isAdmin ? "/admin" : "/dashboard");
+  };
+
+  const handleResendOtp = async () => {
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithOtp({ email: pendingEmail });
+    setLoading(false);
+    if (error) {
+      toast({ title: "Resend Failed", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Code Resent", description: "Check your email for the new code" });
+    }
+  };
+
+  // OTP Verification Screen
+  if (mode === "verify-otp") {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div className="w-full max-w-md space-y-8">
+          <div className="text-center space-y-2">
+            <div className="flex justify-center">
+              <Scale className="w-10 h-10 text-primary" />
+            </div>
+            <h1 className="text-2xl font-serif font-bold text-foreground">Verify Your Email</h1>
+            <p className="text-sm text-muted-foreground">
+              Enter the 6-digit code sent to <span className="text-primary font-medium">{pendingEmail}</span>
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card p-6 space-y-6">
+            <div className="flex justify-center">
+              <InputOTP maxLength={6} value={otpValue} onChange={setOtpValue}>
+                <InputOTPGroup>
+                  <InputOTPSlot index={0} />
+                  <InputOTPSlot index={1} />
+                  <InputOTPSlot index={2} />
+                  <InputOTPSlot index={3} />
+                  <InputOTPSlot index={4} />
+                  <InputOTPSlot index={5} />
+                </InputOTPGroup>
+              </InputOTP>
+            </div>
+
+            <Button
+              onClick={handleVerifyOtp}
+              disabled={otpValue.length !== 6 || loading}
+              className="w-full bg-primary text-primary-foreground hover:bg-gold-bright font-semibold"
+            >
+              {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              {loading ? "Verifying..." : "Verify & Create Account"}
+            </Button>
+
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => { setMode("signup"); setOtpValue(""); }}
+                className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
+              >
+                <ArrowLeft className="w-3 h-3" /> Back
+              </button>
+              <button
+                onClick={handleResendOtp}
+                disabled={loading}
+                className="text-sm text-primary hover:text-gold-bright font-medium"
+              >
+                Resend Code
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-4">
@@ -66,13 +160,13 @@ const AuthPage = () => {
           </div>
           <h1 className="text-2xl font-serif font-bold text-foreground">Legal Intelligence Workspace</h1>
           <p className="text-sm text-muted-foreground">
-            {isLogin ? "Sign in to your account" : "Create a new account"}
+            {mode === "login" ? "Sign in to your account" : "Create a new account"}
           </p>
         </div>
 
         {/* Form Card */}
         <div className="rounded-xl border border-border bg-card p-6 space-y-5">
-          {!isLogin && (
+          {mode === "signup" && (
             <div className="space-y-2">
               <Label className="text-foreground">Full Name</Label>
               <Input
@@ -85,16 +179,17 @@ const AuthPage = () => {
           )}
 
           <div className="space-y-2">
-            <Label className="text-foreground">Username</Label>
+            <Label className="text-foreground">{mode === "login" ? "Email or Username" : "Email"}</Label>
             <Input
-              placeholder="Enter username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              placeholder={mode === "login" ? "Enter email or admin username" : "Enter your email address"}
+              type={mode === "signup" ? "email" : "text"}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               className="bg-input border-border text-foreground"
             />
           </div>
 
-          {!isLogin && (
+          {mode === "signup" && (
             <div className="space-y-2">
               <Label className="text-foreground">Phone Number</Label>
               <Input
@@ -114,7 +209,7 @@ const AuthPage = () => {
                 placeholder="Enter password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && isLogin && handleLogin()}
+                onKeyDown={(e) => e.key === "Enter" && mode === "login" && handleLogin()}
                 className="bg-input border-border text-foreground pr-10"
               />
               <button
@@ -127,7 +222,7 @@ const AuthPage = () => {
             </div>
           </div>
 
-          {!isLogin && (
+          {mode === "signup" && (
             <div className="space-y-2">
               <Label className="text-foreground">Confirm Password</Label>
               <Input
@@ -135,27 +230,28 @@ const AuthPage = () => {
                 placeholder="Confirm password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSignup()}
                 className="bg-input border-border text-foreground"
               />
             </div>
           )}
 
           <Button
-            onClick={isLogin ? handleLogin : handleSignup}
+            onClick={mode === "login" ? handleLogin : handleSignup}
             disabled={loading}
             className="w-full bg-primary text-primary-foreground hover:bg-gold-bright font-semibold"
           >
-            {isLogin ? <LogIn className="w-4 h-4 mr-2" /> : <UserPlus className="w-4 h-4 mr-2" />}
-            {loading ? "Please wait..." : isLogin ? "Sign In" : "Create Account"}
+            {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : mode === "login" ? <LogIn className="w-4 h-4 mr-2" /> : <UserPlus className="w-4 h-4 mr-2" />}
+            {loading ? "Please wait..." : mode === "login" ? "Sign In" : "Create Account"}
           </Button>
 
           <p className="text-center text-sm text-muted-foreground">
-            {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
+            {mode === "login" ? "Don't have an account?" : "Already have an account?"}{" "}
             <button
-              onClick={() => setIsLogin(!isLogin)}
+              onClick={() => setMode(mode === "login" ? "signup" : "login")}
               className="text-primary hover:text-gold-bright font-medium underline underline-offset-2"
             >
-              {isLogin ? "Sign Up" : "Sign In"}
+              {mode === "login" ? "Sign Up" : "Sign In"}
             </button>
           </p>
         </div>
