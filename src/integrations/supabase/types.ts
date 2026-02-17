@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       cases: {
         Row: {
+          analysis_data: Json | null
           created_at: string
           id: string
           title: string
@@ -23,6 +24,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          analysis_data?: Json | null
           created_at?: string
           id?: string
           title?: string
@@ -30,10 +32,35 @@ export type Database = {
           user_id: string
         }
         Update: {
+          analysis_data?: Json | null
           created_at?: string
           id?: string
           title?: string
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      general_messages: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          role: string
+          user_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          role: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          role?: string
           user_id?: string
         }
         Relationships: []

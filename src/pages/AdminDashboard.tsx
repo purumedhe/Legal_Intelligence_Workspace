@@ -108,7 +108,7 @@ const AdminDashboard = () => {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Name</TableHead>
-                    <TableHead>Username</TableHead>
+                    <TableHead>Email</TableHead>
                     <TableHead>Phone</TableHead>
                     <TableHead>Access</TableHead>
                     <TableHead>Subscription</TableHead>

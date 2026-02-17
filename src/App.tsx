@@ -23,7 +23,7 @@ const App = () => (
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/dashboard" element={<UserDashboard />} />
-            <Route path="*" element={<NotFound />} />
+            <Route path="*" element={<Navigate to="/auth" replace />} />
           </Routes>
         </AuthProvider>
       </BrowserRouter>

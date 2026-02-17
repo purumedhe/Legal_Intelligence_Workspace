@@ -16,8 +16,9 @@ interface AuthContextType {
   profile: Profile | null;
   isAdmin: boolean;
   loading: boolean;
-  signUp: (username: string, password: string, name: string, phone: string) => Promise<string | null>;
-  signIn: (username: string, password: string) => Promise<{ error: string | null; isAdmin: boolean }>;
+  signUp: (email: string, password: string, name: string, phone: string) => Promise<string | null>;
+  signIn: (email: string, password: string) => Promise<{ error: string | null; isAdmin: boolean }>;
+  verifyOtp: (email: string, token: string, password: string) => Promise<{ error: string | null; isAdmin: boolean }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -84,30 +85,51 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signUp = async (username: string, password: string, name: string, phone: string): Promise<string | null> => {
-    // Check username uniqueness first
+  const signUp = async (email: string, password: string, name: string, phone: string): Promise<string | null> => {
+    // Check if email already registered
     const { data: existing } = await supabase
       .from("profiles")
       .select("username")
-      .eq("username", username)
+      .eq("username", email)
       .maybeSingle();
 
-    if (existing) return "Username already taken";
+    if (existing) return "Email already registered. Please sign in instead.";
 
-    const email = `${username}@legalworkspace.local`;
-    const { error } = await supabase.auth.signUp({
+    // Send OTP via magic link (creates user if not exists)
+    const { error } = await supabase.auth.signInWithOtp({
       email,
-      password,
-      options: { data: { name, username, phone } },
+      options: {
+        shouldCreateUser: true,
+        data: { name, username: email, phone },
+      },
     });
 
     if (error) return error.message;
     return null;
   };
 
-  const signIn = async (username: string, password: string): Promise<{ error: string | null; isAdmin: boolean }> => {
-    const email = `${username}@legalworkspace.local`;
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const verifyOtp = async (email: string, token: string, password: string): Promise<{ error: string | null; isAdmin: boolean }> => {
+    const { data, error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
+    if (error) return { error: error.message, isAdmin: false };
+
+    // Set password for future logins
+    const { error: updateError } = await supabase.auth.updateUser({ password });
+    if (updateError) {
+      console.error("Failed to set password:", updateError.message);
+    }
+
+    if (data.user) {
+      const adminStatus = await fetchRole(data.user.id);
+      await fetchProfile(data.user.id);
+      return { error: null, isAdmin: adminStatus };
+    }
+    return { error: "Verification failed", isAdmin: false };
+  };
+
+  const signIn = async (email: string, password: string): Promise<{ error: string | null; isAdmin: boolean }> => {
+    // Support admin usernames (no @ = append internal domain)
+    const loginEmail = email.includes("@") ? email : `${email}@legalworkspace.local`;
+    const { data, error } = await supabase.auth.signInWithPassword({ email: loginEmail, password });
     if (error) return { error: error.message, isAdmin: false };
 
     const adminStatus = await fetchRole(data.user.id);
@@ -124,7 +146,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, profile, isAdmin, loading, signUp, signIn, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{ user, session, profile, isAdmin, loading, signUp, signIn, verifyOtp, signOut, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );
