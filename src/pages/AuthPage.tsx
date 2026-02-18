@@ -179,9 +179,9 @@ const AuthPage = () => {
           )}
 
           <div className="space-y-2">
-            <Label className="text-foreground">{mode === "login" ? "Email or Username" : "Email"}</Label>
+            <Label className="text-foreground">Email</Label>
             <Input
-              placeholder={mode === "login" ? "Enter email or admin username" : "Enter your email address"}
+              placeholder="Enter your email"
               type={mode === "signup" ? "email" : "text"}
               value={email}
               onChange={(e) => setEmail(e.target.value)}

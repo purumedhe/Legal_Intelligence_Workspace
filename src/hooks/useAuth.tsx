@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 
@@ -31,6 +31,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
+  const initializedRef = useRef(false);
 
   const fetchProfile = async (userId: string) => {
     const { data } = await supabase
@@ -59,34 +60,46 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   useEffect(() => {
+    // Set up auth listener FIRST, then get initial session
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, sess) => {
       setSession(sess);
       setUser(sess?.user ?? null);
+
       if (sess?.user) {
-        await fetchProfile(sess.user.id);
-        await fetchRole(sess.user.id);
+        // Use setTimeout to avoid Supabase deadlock on token refresh
+        setTimeout(async () => {
+          await fetchProfile(sess.user.id);
+          await fetchRole(sess.user.id);
+          setLoading(false);
+        }, 0);
       } else {
         setProfile(null);
         setIsAdmin(false);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
+    // Get initial session
     supabase.auth.getSession().then(({ data: { session: sess } }) => {
-      setSession(sess);
-      setUser(sess?.user ?? null);
-      if (sess?.user) {
-        fetchProfile(sess.user.id);
-        fetchRole(sess.user.id);
+      if (!sess) {
+        // No session — stop loading immediately
+        setLoading(false);
       }
-      setLoading(false);
+      // If session exists, onAuthStateChange will handle it
     });
 
-    return () => subscription.unsubscribe();
+    // Safety timeout — never hang more than 5 seconds
+    const timeout = setTimeout(() => {
+      setLoading(false);
+    }, 5000);
+
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(timeout);
+    };
   }, []);
 
   const signUp = async (email: string, password: string, name: string, phone: string): Promise<string | null> => {
-    // Check if email already registered
     const { data: existing } = await supabase
       .from("profiles")
       .select("username")
@@ -95,7 +108,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     if (existing) return "Email already registered. Please sign in instead.";
 
-    // Send OTP via magic link (creates user if not exists)
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
@@ -112,7 +124,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const { data, error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
     if (error) return { error: error.message, isAdmin: false };
 
-    // Set password for future logins
     const { error: updateError } = await supabase.auth.updateUser({ password });
     if (updateError) {
       console.error("Failed to set password:", updateError.message);
@@ -127,7 +138,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string): Promise<{ error: string | null; isAdmin: boolean }> => {
-    // Support admin usernames (no @ = append internal domain)
     const loginEmail = email.includes("@") ? email : `${email}@legalworkspace.local`;
     const { data, error } = await supabase.auth.signInWithPassword({ email: loginEmail, password });
     if (error) return { error: error.message, isAdmin: false };

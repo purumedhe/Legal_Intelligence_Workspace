@@ -5,13 +5,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import { useIsMobile } from "@/hooks/use-mobile";
 import ReactMarkdown from "react-markdown";
 import CaseNotepad from "@/components/CaseNotepad";
 import AnalysisResults, { type AnalysisData } from "@/components/AnalysisResults";
 import DocumentModal from "@/components/DocumentModal";
 import {
   Scale, LogOut, Plus, MessageSquare, Send, Loader2, Trash2, Pencil, Check, X,
-  Bot, History, Save,
+  Bot, Save, Menu, Briefcase, BookText,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -37,6 +38,7 @@ const UserDashboard = () => {
   const { user, profile, loading, signOut, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const isMobile = useIsMobile();
 
   // View state
   const [view, setView] = useState<ViewMode>("empty");
@@ -65,6 +67,7 @@ const UserDashboard = () => {
   const [showDocModal, setShowDocModal] = useState(false);
   const [showSaveCaseDialog, setShowSaveCaseDialog] = useState(false);
   const [saveCaseTitle, setSaveCaseTitle] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -124,6 +127,7 @@ const UserDashboard = () => {
     setActiveCase(caseId);
     setView("case-detail");
     setEditingCaseId(null);
+    if (isMobile) setSidebarOpen(false);
 
     const { data: caseData } = await (supabase as any)
       .from("cases")
@@ -140,6 +144,7 @@ const UserDashboard = () => {
     setActiveCase(null);
     setActiveCaseAnalysis(null);
     setMessages([]);
+    if (isMobile) setSidebarOpen(false);
   };
 
   const deleteCase = async (id: string) => {
@@ -160,7 +165,6 @@ const UserDashboard = () => {
     setEditingCaseId(null);
   };
 
-  // Analyze case (from CaseNotepad)
   const analyzeCase = async (description: string, category: string, offence: string) => {
     await refreshProfile();
     if (profile && !profile.subscription_active) { setShowSubDialog(true); return; }
@@ -192,7 +196,6 @@ const UserDashboard = () => {
       const jsonStr = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
       const parsed: AnalysisData = JSON.parse(jsonStr);
 
-      // Create case with analysis
       const title = `${category || "Case"} - ${offence || "Analysis"}`;
       const { data: newCase } = await (supabase as any)
         .from("cases")
@@ -272,6 +275,61 @@ const UserDashboard = () => {
     }
 
     return assistantContent;
+  };
+
+  // "Explain in Detail" handler
+  const handleExplainInDetail = async (
+    msgIndex: number,
+    chatType: "case" | "general",
+  ) => {
+    const msgs = chatType === "case" ? messages : generalMessages;
+    const setMsgs = chatType === "case" ? setMessages : setGeneralMessages;
+    const setSending = chatType === "case" ? setIsSending : setIsGeneralSending;
+
+    const previousAnswer = msgs[msgIndex]?.content;
+    if (!previousAnswer) return;
+
+    await refreshProfile();
+    if (profile && !profile.subscription_active) { setShowSubDialog(true); return; }
+    if (profile && !profile.access_enabled) { setShowBlockedDialog(true); return; }
+
+    const detailMsg: ChatMessage = { role: "user", content: "Explain in Detail" };
+    const allMsgs = [...msgs.slice(0, msgIndex + 1), detailMsg];
+    setMsgs((prev) => [...prev, detailMsg]);
+    setSending(true);
+
+    // Save user message
+    if (chatType === "case" && activeCase) {
+      await supabase.from("messages").insert({ case_id: activeCase, role: "user", content: detailMsg.content });
+    } else if (chatType === "general") {
+      await (supabase as any).from("general_messages").insert({ user_id: user!.id, role: "user", content: detailMsg.content });
+    }
+
+    try {
+      const assistantContent = await streamChat(allMsgs, (content) => {
+        setMsgs((prev) => {
+          const last = prev[prev.length - 1];
+          if (last?.role === "assistant") {
+            return prev.map((m, i) => i === prev.length - 1 ? { ...m, content } : m);
+          }
+          return [...prev, { role: "assistant", content }];
+        });
+      });
+
+      if (assistantContent) {
+        if (chatType === "case" && activeCase) {
+          await supabase.from("messages").insert({ case_id: activeCase, role: "assistant", content: assistantContent });
+          await supabase.from("cases").update({ updated_at: new Date().toISOString() }).eq("id", activeCase);
+        } else if (chatType === "general") {
+          await (supabase as any).from("general_messages").insert({ user_id: user!.id, role: "assistant", content: assistantContent });
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Error", description: "Failed to get detailed response", variant: "destructive" });
+    } finally {
+      setSending(false);
+    }
   };
 
   // Send message in case chat
@@ -370,7 +428,6 @@ const UserDashboard = () => {
       }));
       await supabase.from("messages").insert(msgInserts);
 
-      // Clear general messages
       await (supabase as any).from("general_messages").delete().eq("user_id", user!.id);
       setGeneralMessages([]);
 
@@ -390,8 +447,8 @@ const UserDashboard = () => {
 
   if (loading) return <div className="min-h-screen bg-background flex items-center justify-center text-foreground">Loading...</div>;
 
-  // Chat message renderer
-  const renderMessages = (msgs: ChatMessage[], sending: boolean) => (
+  // Chat message renderer with "Explain in Detail" button
+  const renderMessages = (msgs: ChatMessage[], sending: boolean, chatType: "case" | "general") => (
     <>
       {msgs.length === 0 && (
         <div className="text-center text-muted-foreground text-sm py-16">
@@ -399,18 +456,33 @@ const UserDashboard = () => {
         </div>
       )}
       {msgs.map((msg, i) => (
-        <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-          <div className={`max-w-[75%] rounded-lg px-4 py-3 text-sm ${
-            msg.role === "user"
-              ? "bg-primary text-primary-foreground"
-              : "bg-secondary text-secondary-foreground"
-          }`}>
-            {msg.role === "assistant" ? (
-              <div className="prose prose-sm prose-invert max-w-none">
-                <ReactMarkdown>{msg.content}</ReactMarkdown>
-              </div>
-            ) : msg.content}
+        <div key={i}>
+          <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+            <div className={`max-w-[75%] rounded-lg px-4 py-3 text-sm ${
+              msg.role === "user"
+                ? "bg-primary text-primary-foreground"
+                : "bg-secondary text-secondary-foreground"
+            }`}>
+              {msg.role === "assistant" ? (
+                <div className="prose prose-sm prose-invert max-w-none">
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                </div>
+              ) : msg.content}
+            </div>
           </div>
+          {/* Explain in Detail button after assistant messages */}
+          {msg.role === "assistant" && msg.content && !sending && msg.content !== "Explain in Detail" && (
+            <div className="flex justify-start mt-1 ml-1">
+              <button
+                onClick={() => handleExplainInDetail(i, chatType)}
+                className="text-xs text-primary hover:text-gold-bright font-medium flex items-center gap-1 transition-colors"
+                disabled={isSending || isGeneralSending}
+              >
+                <BookText className="w-3 h-3" />
+                Explain in Detail
+              </button>
+            </div>
+          )}
         </div>
       ))}
       {sending && msgs[msgs.length - 1]?.role !== "assistant" && (
@@ -423,88 +495,115 @@ const UserDashboard = () => {
     </>
   );
 
+  // Sidebar content (shared between mobile overlay and desktop)
+  const sidebarContent = (
+    <>
+      <div className="p-4 space-y-2 border-b border-border">
+        <Button onClick={handleNewCase} className="w-full bg-primary text-primary-foreground hover:bg-gold-bright font-semibold">
+          <Plus className="w-4 h-4 mr-2" /> New Case
+        </Button>
+        <Button
+          variant={view === "general-chat" ? "secondary" : "outline"}
+          onClick={() => { setView("general-chat"); setActiveCase(null); if (isMobile) setSidebarOpen(false); }}
+          className="w-full border-border text-muted-foreground hover:text-foreground"
+        >
+          <Bot className="w-4 h-4 mr-2" /> Legal Assistant
+        </Button>
+      </div>
+
+      <div className="px-4 py-2 flex items-center gap-2">
+        <Briefcase className="w-4 h-4 text-muted-foreground" />
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Cases</span>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1">
+        {cases.length === 0 && (
+          <p className="text-center text-muted-foreground text-xs py-8">No cases yet</p>
+        )}
+        {cases.map((c) => (
+          <div
+            key={c.id}
+            className={`group flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer transition-colors ${
+              activeCase === c.id && view === "case-detail"
+                ? "bg-secondary border border-primary/30 gold-border-glow"
+                : "hover:bg-secondary/50"
+            }`}
+            onClick={() => openCase(c.id)}
+          >
+            <MessageSquare className="w-4 h-4 text-primary shrink-0" />
+            {editingCaseId === c.id ? (
+              <div className="flex items-center gap-1 flex-1 min-w-0">
+                <Input
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && renameCase(c.id)}
+                  className="h-6 text-xs bg-input border-border"
+                  autoFocus
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <button onClick={(e) => { e.stopPropagation(); renameCase(c.id); }} className="text-primary"><Check className="w-3 h-3" /></button>
+                <button onClick={(e) => { e.stopPropagation(); setEditingCaseId(null); }} className="text-muted-foreground"><X className="w-3 h-3" /></button>
+              </div>
+            ) : (
+              <>
+                <span className="text-sm text-foreground truncate flex-1">{c.title}</span>
+                <div className="hidden group-hover:flex items-center gap-1">
+                  <button onClick={(e) => { e.stopPropagation(); setEditingCaseId(c.id); setEditTitle(c.title); }} className="text-muted-foreground hover:text-primary">
+                    <Pencil className="w-3 h-3" />
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); deleteCase(c.id); }} className="text-muted-foreground hover:text-destructive">
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
-      <header className="border-b border-border px-6 py-3 flex items-center justify-between shrink-0">
+      <header className="border-b border-border px-4 md:px-6 py-3 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
+          {isMobile && (
+            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="text-muted-foreground hover:text-foreground">
+              <Menu className="w-5 h-5" />
+            </button>
+          )}
           <Scale className="w-6 h-6 text-primary" />
-          <h1 className="text-lg font-serif font-bold text-foreground">Legal Intelligence Workspace</h1>
+          <h1 className="text-base md:text-lg font-serif font-bold text-foreground">Legal Intelligence Workspace</h1>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-muted-foreground">{profile?.name || "User"}</span>
+          <span className="text-xs text-muted-foreground hidden sm:inline">{profile?.name || "User"}</span>
           <Button variant="outline" size="sm" onClick={handleSignOut} className="border-border text-muted-foreground hover:text-foreground">
-            <LogOut className="w-4 h-4 mr-1" /> Sign Out
+            <LogOut className="w-4 h-4 mr-1" /> <span className="hidden sm:inline">Sign Out</span>
           </Button>
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <aside className="w-72 border-r border-border bg-card flex flex-col shrink-0">
-          <div className="p-4 space-y-2 border-b border-border">
-            <Button onClick={handleNewCase} className="w-full bg-primary text-primary-foreground hover:bg-gold-bright font-semibold">
-              <Plus className="w-4 h-4 mr-2" /> New Case
-            </Button>
-            <Button
-              variant={view === "general-chat" ? "secondary" : "outline"}
-              onClick={() => { setView("general-chat"); setActiveCase(null); }}
-              className="w-full border-border text-muted-foreground hover:text-foreground"
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Mobile sidebar overlay */}
+        {isMobile && sidebarOpen && (
+          <div className="fixed inset-0 z-40 flex" onClick={() => setSidebarOpen(false)}>
+            <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" />
+            <aside
+              className="relative w-72 bg-card border-r border-border flex flex-col z-50 animate-in slide-in-from-left duration-200"
+              onClick={(e) => e.stopPropagation()}
             >
-              <Bot className="w-4 h-4 mr-2" /> AI Chat (General)
-            </Button>
+              {sidebarContent}
+            </aside>
           </div>
+        )}
 
-          <div className="px-4 py-2 flex items-center gap-2">
-            <History className="w-4 h-4 text-muted-foreground" />
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">History</span>
-          </div>
-
-          <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1">
-            {cases.length === 0 && (
-              <p className="text-center text-muted-foreground text-xs py-8">No cases yet</p>
-            )}
-            {cases.map((c) => (
-              <div
-                key={c.id}
-                className={`group flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer transition-colors ${
-                  activeCase === c.id && view === "case-detail"
-                    ? "bg-secondary border border-primary/30 gold-border-glow"
-                    : "hover:bg-secondary/50"
-                }`}
-                onClick={() => openCase(c.id)}
-              >
-                <MessageSquare className="w-4 h-4 text-primary shrink-0" />
-                {editingCaseId === c.id ? (
-                  <div className="flex items-center gap-1 flex-1 min-w-0">
-                    <Input
-                      value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && renameCase(c.id)}
-                      className="h-6 text-xs bg-input border-border"
-                      autoFocus
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                    <button onClick={(e) => { e.stopPropagation(); renameCase(c.id); }} className="text-primary"><Check className="w-3 h-3" /></button>
-                    <button onClick={(e) => { e.stopPropagation(); setEditingCaseId(null); }} className="text-muted-foreground"><X className="w-3 h-3" /></button>
-                  </div>
-                ) : (
-                  <>
-                    <span className="text-sm text-foreground truncate flex-1">{c.title}</span>
-                    <div className="hidden group-hover:flex items-center gap-1">
-                      <button onClick={(e) => { e.stopPropagation(); setEditingCaseId(c.id); setEditTitle(c.title); }} className="text-muted-foreground hover:text-primary">
-                        <Pencil className="w-3 h-3" />
-                      </button>
-                      <button onClick={(e) => { e.stopPropagation(); deleteCase(c.id); }} className="text-muted-foreground hover:text-destructive">
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-        </aside>
+        {/* Desktop sidebar */}
+        {!isMobile && (
+          <aside className="w-72 border-r border-border bg-card flex flex-col shrink-0">
+            {sidebarContent}
+          </aside>
+        )}
 
         {/* Main content */}
         <main className="flex-1 flex flex-col overflow-hidden">
@@ -513,14 +612,14 @@ const UserDashboard = () => {
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center space-y-3">
                 <Scale className="w-12 h-12 text-primary/30 mx-auto" />
-                <p className="text-muted-foreground text-sm">Select a case, start a new one, or open general chat</p>
+                <p className="text-muted-foreground text-sm">Select a case, start a new one, or open Legal Assistant</p>
               </div>
             </div>
           )}
 
           {/* New Case view */}
           {view === "new-case" && (
-            <div className="flex-1 overflow-y-auto p-6">
+            <div className="flex-1 overflow-y-auto p-4 md:p-6">
               <CaseNotepad onAnalyze={analyzeCase} isLoading={isAnalyzing} />
               {isAnalyzing && (
                 <div className="text-center py-12">
@@ -536,15 +635,15 @@ const UserDashboard = () => {
           {/* Case detail view */}
           {view === "case-detail" && activeCase && (
             <>
-              <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-4">
+              <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
                 {activeCaseAnalysis && (
                   <div className="mb-6">
                     <AnalysisResults data={activeCaseAnalysis} onViewDocument={() => setShowDocModal(true)} />
                   </div>
                 )}
-                {renderMessages(messages, isSending)}
+                {renderMessages(messages, isSending, "case")}
               </div>
-              <div className="border-t border-border p-4 flex gap-2 shrink-0">
+              <div className="border-t border-border p-3 md:p-4 flex gap-2 shrink-0">
                 <Input
                   placeholder="Continue your legal consultation..."
                   value={input}
@@ -562,10 +661,10 @@ const UserDashboard = () => {
           {/* General chat view */}
           {view === "general-chat" && (
             <>
-              <div className="border-b border-border px-6 py-2 flex items-center justify-between shrink-0">
+              <div className="border-b border-border px-4 md:px-6 py-2 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-2">
                   <Bot className="w-4 h-4 text-primary" />
-                  <span className="text-sm font-medium text-foreground">General AI Chat</span>
+                  <span className="text-sm font-medium text-foreground">Legal Assistant</span>
                 </div>
                 {generalMessages.length > 0 && (
                   <Button
@@ -578,10 +677,10 @@ const UserDashboard = () => {
                   </Button>
                 )}
               </div>
-              <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-4">
-                {renderMessages(generalMessages, isGeneralSending)}
+              <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
+                {renderMessages(generalMessages, isGeneralSending, "general")}
               </div>
-              <div className="border-t border-border p-4 flex gap-2 shrink-0">
+              <div className="border-t border-border p-3 md:p-4 flex gap-2 shrink-0">
                 <Input
                   placeholder="Ask any legal question..."
                   value={generalInput}

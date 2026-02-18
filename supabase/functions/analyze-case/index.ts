@@ -13,9 +13,19 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
-    const systemPrompt = type === "chat"
-      ? `You are a senior Indian legal expert AI assistant. You have deep knowledge of Indian Penal Code (IPC), Bharatiya Nyaya Sanhita (BNS), Code of Criminal Procedure (CrPC), Bharatiya Nagarik Suraksha Sanhita (BNSS), Indian Evidence Act, Bharatiya Sakshya Adhiniyam, and all major Indian legal statutes. You help lawyers with case analysis, legal research, and strategy. Always cite specific sections and relevant case law. Be precise, authoritative, and practical. Maintain context from the conversation.`
-      : `You are a senior Indian legal analysis AI. Given a case description, case category, and offence type, provide a comprehensive structured analysis in the following JSON format:
+    const chatSystemPrompt = `You are a senior Indian legal expert AI assistant. You have deep knowledge of Indian Penal Code (IPC), Bharatiya Nyaya Sanhita (BNS), Code of Criminal Procedure (CrPC), Bharatiya Nagarik Suraksha Sanhita (BNSS), Indian Evidence Act, Bharatiya Sakshya Adhiniyam, and all major Indian legal statutes.
+
+RESPONSE FORMAT RULES (CRITICAL):
+- Be CONCISE by default. Keep answers short and structured.
+- Use bullet points and headings. Avoid long paragraphs.
+- Cite specific sections and relevant case law.
+- Use legal formatting: bold section numbers, clear hierarchy.
+- Maximum 200 words unless the user explicitly asks for more detail.
+- If the user says "Explain in Detail" or similar, then provide a comprehensive expanded answer with full legal reasoning, all relevant sections, case precedents, and strategic analysis. In that case, there is no word limit.
+
+Maintain context from the conversation. Be precise, authoritative, and practical.`;
+
+    const analyzeSystemPrompt = `You are a senior Indian legal analysis AI. Given a case description, case category, and offence type, provide a comprehensive structured analysis in the following JSON format:
 {
   "legalSections": [{"section": "section name", "description": "brief description"}],
   "punishmentRange": "detailed punishment/sentence range description",
@@ -24,6 +34,8 @@ serve(async (req) => {
   "courtDocument": "A complete court-ready document brief including: Title, Facts of the Case, Applicable Legal Provisions, Arguments, Prayer/Relief Sought, and Conclusion. Format it professionally."
 }
 Respond ONLY with valid JSON. Be thorough, cite specific Indian legal sections (IPC/BNS), and reference real landmark Indian case precedents.`;
+
+    const systemPrompt = type === "chat" ? chatSystemPrompt : analyzeSystemPrompt;
 
     const body: Record<string, unknown> = {
       model: "google/gemini-3-flash-preview",
@@ -55,7 +67,6 @@ Respond ONLY with valid JSON. Be thorough, cite specific Indian legal sections (
 
       return new Response(response.body, { headers: { ...corsHeaders, "Content-Type": "text/event-stream" } });
     } else {
-      // Non-streaming for analysis
       const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
