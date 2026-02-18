@@ -634,13 +634,13 @@ const UserDashboard = () => {
 
           {/* Case detail view */}
           {view === "case-detail" && activeCase && (
-            <>
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {activeCaseAnalysis && (
+                <div className="shrink-0 overflow-y-auto max-h-[40vh] p-4 md:p-6 border-b border-border">
+                  <AnalysisResults data={activeCaseAnalysis} onViewDocument={() => setShowDocModal(true)} />
+                </div>
+              )}
               <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
-                {activeCaseAnalysis && (
-                  <div className="mb-6">
-                    <AnalysisResults data={activeCaseAnalysis} onViewDocument={() => setShowDocModal(true)} />
-                  </div>
-                )}
                 {renderMessages(messages, isSending, "case")}
               </div>
               <div className="border-t border-border p-3 md:p-4 flex gap-2 shrink-0">
@@ -655,7 +655,7 @@ const UserDashboard = () => {
                   <Send className="w-4 h-4" />
                 </Button>
               </div>
-            </>
+            </div>
           )}
 
           {/* General chat view */}

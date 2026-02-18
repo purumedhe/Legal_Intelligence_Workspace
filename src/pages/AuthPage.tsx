@@ -4,24 +4,18 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
-import { Scale, LogIn, UserPlus, Eye, EyeOff, ArrowLeft, Loader2 } from "lucide-react";
+import { Scale, LogIn, UserPlus, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
 
 const AuthPage = () => {
-  const [mode, setMode] = useState<"login" | "signup" | "verify-otp">("login");
+  const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [otpValue, setOtpValue] = useState("");
-  const [pendingEmail, setPendingEmail] = useState("");
-  const [pendingPassword, setPendingPassword] = useState("");
-  const { signIn, signUp, verifyOtp } = useAuth();
+  const { signIn, signUp } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -38,7 +32,7 @@ const AuthPage = () => {
   };
 
   const handleSignup = async () => {
-    if (!name.trim() || !email.trim() || !phone.trim() || !password || !confirmPassword) {
+    if (!email.trim() || !phone.trim() || !password || !confirmPassword) {
       toast({ title: "Missing Fields", description: "Please fill all fields", variant: "destructive" });
       return;
     }
@@ -55,100 +49,15 @@ const AuthPage = () => {
       return;
     }
     setLoading(true);
-    const error = await signUp(email.trim(), password, name.trim(), phone.trim());
+    const error = await signUp(email.trim(), password, email.trim(), phone.trim());
     setLoading(false);
     if (error) {
       toast({ title: "Signup Failed", description: error, variant: "destructive" });
       return;
     }
-    setPendingEmail(email.trim());
-    setPendingPassword(password);
-    setMode("verify-otp");
-    toast({ title: "Verification Code Sent", description: "Check your email for the 6-digit code" });
+    toast({ title: "Account Created", description: "Welcome to Legal Intelligence Workspace!" });
+    navigate("/dashboard");
   };
-
-  const handleVerifyOtp = async () => {
-    if (otpValue.length !== 6) return;
-    setLoading(true);
-    const { error, isAdmin } = await verifyOtp(pendingEmail, otpValue, pendingPassword);
-    setLoading(false);
-    if (error) {
-      toast({ title: "Verification Failed", description: error, variant: "destructive" });
-      return;
-    }
-    toast({ title: "Account Verified", description: "Welcome to Legal Intelligence Workspace!" });
-    navigate(isAdmin ? "/admin" : "/dashboard");
-  };
-
-  const handleResendOtp = async () => {
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithOtp({ email: pendingEmail });
-    setLoading(false);
-    if (error) {
-      toast({ title: "Resend Failed", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: "Code Resent", description: "Check your email for the new code" });
-    }
-  };
-
-  // OTP Verification Screen
-  if (mode === "verify-otp") {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center px-4">
-        <div className="w-full max-w-md space-y-8">
-          <div className="text-center space-y-2">
-            <div className="flex justify-center">
-              <Scale className="w-10 h-10 text-primary" />
-            </div>
-            <h1 className="text-2xl font-serif font-bold text-foreground">Verify Your Email</h1>
-            <p className="text-sm text-muted-foreground">
-              Enter the 6-digit code sent to <span className="text-primary font-medium">{pendingEmail}</span>
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-border bg-card p-6 space-y-6">
-            <div className="flex justify-center">
-              <InputOTP maxLength={6} value={otpValue} onChange={setOtpValue}>
-                <InputOTPGroup>
-                  <InputOTPSlot index={0} />
-                  <InputOTPSlot index={1} />
-                  <InputOTPSlot index={2} />
-                  <InputOTPSlot index={3} />
-                  <InputOTPSlot index={4} />
-                  <InputOTPSlot index={5} />
-                </InputOTPGroup>
-              </InputOTP>
-            </div>
-
-            <Button
-              onClick={handleVerifyOtp}
-              disabled={otpValue.length !== 6 || loading}
-              className="w-full bg-primary text-primary-foreground hover:bg-gold-bright font-semibold"
-            >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-              {loading ? "Verifying..." : "Verify & Create Account"}
-            </Button>
-
-            <div className="flex items-center justify-between">
-              <button
-                onClick={() => { setMode("signup"); setOtpValue(""); }}
-                className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
-              >
-                <ArrowLeft className="w-3 h-3" /> Back
-              </button>
-              <button
-                onClick={handleResendOtp}
-                disabled={loading}
-                className="text-sm text-primary hover:text-gold-bright font-medium"
-              >
-                Resend Code
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-4">
@@ -166,23 +75,11 @@ const AuthPage = () => {
 
         {/* Form Card */}
         <div className="rounded-xl border border-border bg-card p-6 space-y-5">
-          {mode === "signup" && (
-            <div className="space-y-2">
-              <Label className="text-foreground">Full Name</Label>
-              <Input
-                placeholder="Enter your full name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="bg-input border-border text-foreground"
-              />
-            </div>
-          )}
-
           <div className="space-y-2">
             <Label className="text-foreground">Email</Label>
             <Input
               placeholder="Enter your email"
-              type={mode === "signup" ? "email" : "text"}
+              type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="bg-input border-border text-foreground"
