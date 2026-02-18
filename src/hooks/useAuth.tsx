@@ -100,23 +100,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const signUp = async (email: string, password: string, name: string, phone: string): Promise<string | null> => {
-    const { data: existing } = await supabase
-      .from("profiles")
-      .select("username")
-      .eq("username", email)
-      .maybeSingle();
-
-    if (existing) return "Email already registered. Please sign in instead.";
-
-    const { error } = await supabase.auth.signInWithOtp({
+    const { data, error } = await supabase.auth.signUp({
       email,
+      password,
       options: {
-        shouldCreateUser: true,
         data: { name, username: email, phone },
       },
     });
 
-    if (error) return error.message;
+    if (error) {
+      if (error.message?.toLowerCase().includes("already registered")) {
+        return "Email already registered. Please sign in instead.";
+      }
+      return error.message;
+    }
+
+    if (data.user) {
+      await fetchProfile(data.user.id);
+      await fetchRole(data.user.id);
+    }
+
     return null;
   };
 
