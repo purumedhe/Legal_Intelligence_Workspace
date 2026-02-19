@@ -4,11 +4,15 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Scale, LogOut, Users, ShieldCheck } from "lucide-react";
+import { Scale, LogOut, Users, ShieldCheck, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 interface UserRow {
   user_id: string;
@@ -67,6 +71,26 @@ const AdminDashboard = () => {
     }
   };
 
+  const deleteUser = async (userId: string) => {
+    // Delete profile, roles, cases, messages, general_messages
+    await supabase.from("general_messages").delete().eq("user_id", userId);
+    // Delete cases and their messages
+    const { data: userCases } = await supabase.from("cases").select("id").eq("user_id", userId);
+    if (userCases && userCases.length > 0) {
+      const caseIds = userCases.map((c: any) => c.id);
+      await supabase.from("messages").delete().in("case_id", caseIds);
+      await supabase.from("cases").delete().eq("user_id", userId);
+    }
+    // Delete profile and roles via edge function
+    const { error } = await supabase.functions.invoke("delete-user", { body: { userId } });
+    if (error) {
+      toast({ title: "Error", description: "Failed to delete user", variant: "destructive" });
+    } else {
+      setUsers((prev) => prev.filter((u) => u.user_id !== userId));
+      toast({ title: "User Deleted", description: "User has been removed from the system" });
+    }
+  };
+
   const handleSignOut = async () => {
     await signOut();
     navigate("/auth");
@@ -110,8 +134,10 @@ const AdminDashboard = () => {
                     <TableHead>Name</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Phone</TableHead>
+                    <TableHead>Signup Date</TableHead>
                     <TableHead>Access</TableHead>
                     <TableHead>Subscription</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -120,6 +146,7 @@ const AdminDashboard = () => {
                       <TableCell className="font-medium text-foreground">{u.name}</TableCell>
                       <TableCell className="text-muted-foreground">{u.username}</TableCell>
                       <TableCell className="text-muted-foreground">{u.phone || "—"}</TableCell>
+                      <TableCell className="text-muted-foreground text-xs">{new Date(u.created_at).toLocaleDateString()}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Switch
@@ -142,6 +169,29 @@ const AdminDashboard = () => {
                           </span>
                         </div>
                       </TableCell>
+                      <TableCell>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="outline" size="sm" className="border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground">
+                              <Trash2 className="w-3 h-3 mr-1" /> Delete
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent className="bg-card border-border">
+                            <AlertDialogHeader>
+                              <AlertDialogTitle className="text-foreground">Delete User</AlertDialogTitle>
+                              <AlertDialogDescription className="text-muted-foreground">
+                                Are you sure you want to delete <strong>{u.name || u.username}</strong>? This will permanently remove the user and all their data.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel className="border-border">Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => deleteUser(u.user_id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                Delete
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -150,6 +200,9 @@ const AdminDashboard = () => {
           )}
         </div>
       </main>
+      <div className="py-2 text-center">
+        <span className="text-[10px] text-muted-foreground/50">Built by Puru</span>
+      </div>
     </div>
   );
 };
