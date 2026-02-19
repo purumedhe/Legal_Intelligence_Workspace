@@ -600,7 +600,7 @@ const UserDashboard = () => {
 
         {/* Desktop sidebar */}
         {!isMobile && (
-          <aside className="w-72 border-r border-border bg-card flex flex-col shrink-0">
+          <aside className="w-72 border-r border-border bg-card flex flex-col shrink-0 overflow-hidden">
             {sidebarContent}
           </aside>
         )}
@@ -634,22 +634,22 @@ const UserDashboard = () => {
 
           {/* Case detail view */}
           {view === "case-detail" && activeCase && (
-            <div className="flex-1 overflow-y-auto">
-              {/* Analysis outputs — stacked, scrolls with page */}
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Analysis outputs — stacked, scrolls independently */}
               {activeCaseAnalysis && (
-                <div className="p-4 md:p-6">
+                <div className="overflow-y-auto p-4 md:p-6 shrink" style={{ maxHeight: "45vh" }}>
                   <AnalysisResults data={activeCaseAnalysis} onViewDocument={() => setShowDocModal(true)} />
                 </div>
               )}
               {/* Full-width chatbot block with internal scroll */}
-              <div className="border-t border-border flex flex-col" style={{ height: "60vh", minHeight: "400px" }}>
+              <div className="border-t border-border flex flex-col flex-1 min-h-0">
                 <div className="px-4 md:px-6 py-2 border-b border-border shrink-0">
                   <div className="flex items-center gap-2">
                     <Bot className="w-4 h-4 text-primary" />
                     <span className="text-sm font-medium text-foreground">Case Chat</span>
                   </div>
                 </div>
-                <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
+                <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 min-h-0">
                   {renderMessages(messages, isSending, "case")}
                 </div>
                 <div className="border-t border-border p-3 md:p-4 flex gap-2 shrink-0">
