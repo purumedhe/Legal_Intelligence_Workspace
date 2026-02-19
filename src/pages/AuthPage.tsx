@@ -152,6 +152,8 @@ const AuthPage = () => {
             </button>
           </p>
         </div>
+
+        <p className="text-center text-[10px] text-muted-foreground/50 mt-4">Built by Puru</p>
       </div>
     </div>
   );
